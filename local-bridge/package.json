@@ -1,0 +1,16 @@
+{
+  "name": "local-bridge",
+  "version": "1.0.0",
+  "description": "Runs on the HP laptop — connects camera nodes to the cloud, tracks health, and handles storage uploads",
+  "main": "src/index.js",
+  "type": "module",
+  "scripts": {
+    "start": "node src/index.js",
+    "dev": "node --watch src/index.js"
+  },
+  "dependencies": {
+    "dotenv": "^16.4.5",
+    "socket.io-client": "^4.8.3",
+    "googleapis": "^140.0.1"
+  }
+}

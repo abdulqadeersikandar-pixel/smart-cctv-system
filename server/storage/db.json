@@ -1,0 +1,40 @@
+{
+  "cameras": [
+    {
+      "id": "j3-front-door",
+      "name": "Samsung J3 Pro - Front Door",
+      "sourceType": "phone",
+      "sourceUrl": "",
+      "status": "online",
+      "health": "healthy",
+      "createdAt": "2026-07-25T04:42:45.427Z",
+      "updatedAt": "2026-07-25T05:01:02.939Z",
+      "lastSeenAt": "2026-07-25T05:01:02.939Z"
+    }
+  ],
+  "events": [
+    {
+      "id": "ea77d930-8982-4488-8b9d-3e0025bd2f33",
+      "type": "system",
+      "cameraId": "j3-front-door",
+      "cameraName": "Samsung J3 Pro - Front Door",
+      "message": "Recording saved (manual)",
+      "screenshotPath": "",
+      "videoPath": "storage/recordings/j3-front-door/1784954630986-f94d41ac-f7e7-447a-b593-ce31caa11b12.webm",
+      "createdAt": "2026-07-25T04:43:45.539Z",
+      "severity": "info"
+    }
+  ],
+  "recordings": [
+    {
+      "id": "b077c71b-c550-480f-929c-074ff3f9271a",
+      "cameraId": "j3-front-door",
+      "cameraName": "Samsung J3 Pro - Front Door",
+      "trigger": "manual",
+      "filePath": "storage/recordings/j3-front-door/1784954630986-f94d41ac-f7e7-447a-b593-ce31caa11b12.webm",
+      "sizeBytes": 692007,
+      "durationSeconds": 5,
+      "createdAt": "2026-07-25T04:43:45.539Z"
+    }
+  ]
+}
