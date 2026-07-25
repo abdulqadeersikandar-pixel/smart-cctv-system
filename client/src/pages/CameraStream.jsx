@@ -206,9 +206,14 @@ export default function CameraStream() {
 
     navigator.mediaDevices
       .getUserMedia({
-        video: { width: 640, height: 480, frameRate: { ideal: 24 } },
-        audio: false,
-      })
+  video: {
+    facingMode: { ideal: "environment" },
+    width: { ideal: 640 },
+    height: { ideal: 480 },
+    frameRate: { ideal: 24 },
+  },
+  audio: false,
+})
       .then((stream) => {
         streamRef.current = stream;
         if (videoRef.current) {
