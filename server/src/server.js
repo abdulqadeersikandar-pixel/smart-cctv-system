@@ -8,12 +8,15 @@ import {
   getSnapshot,
   setViewerCamera,
   getViewerCamera,
+  removeViewerCamera,
   getCameraSocketIds,
 } from './services/nodeRegistry.js';
 import { env } from './config/env.js';
 import { store } from './services/dataStore.js';
-import { saveDataUrlImage, saveBase64Video } from './services/fileStorage.js';
+import { resolveStorageAbsolutePath, saveDataUrlImage, saveBase64Video } from './services/fileStorage.js';
 import { HttpError } from './utils/httpError.js';
+import { isDriveSyncEnabled, uploadRecordingFileToDrive } from './services/driveStorage.js';
+import { fileExistsInStorage, runRetentionSweepWithEventLog } from './services/recordingRetention.js';
 
 await store.initialize();
 
@@ -30,37 +33,127 @@ function broadcastCameraStatus() {
   io.emit('camera-status', { cameras: listOnlineCameras() });
 }
 
+async function archiveRecordingToDrive(recording) {
+  if (!isDriveSyncEnabled()) {
+    const localOnly = await store.updateRecording(recording.id, {
+      uploadStatus: 'local_only',
+      uploadError: '',
+    });
+    io.emit('recording-updated', localOnly);
+    return;
+  }
+  const exists = await fileExistsInStorage(recording.filePath);
+  if (!exists) {
+    const missing = await store.updateRecording(recording.id, {
+      uploadStatus: 'failed',
+      uploadError: 'Local recording file is missing before cloud sync.',
+    });
+    io.emit('recording-updated', missing);
+    return;
+  }
+
+  const uploading = await store.updateRecording(recording.id, {
+    uploadStatus: 'uploading',
+    uploadError: '',
+  });
+  io.emit('recording-updated', uploading);
+
+  const absolutePath = resolveStorageAbsolutePath(recording.filePath);
+  const uploaded = await uploadRecordingFileToDrive(absolutePath, {
+    cameraId: recording.cameraId,
+    createdAt: recording.createdAt,
+    fileName: recording.originalFileName || `${recording.cameraId}-${new Date(recording.createdAt).toISOString()}.webm`,
+  });
+  if (!uploaded) return;
+
+  const updated = await store.updateRecording(recording.id, {
+    driveFileId: uploaded.driveFileId,
+    driveLink: uploaded.driveLink,
+    driveDownloadLink: uploaded.driveDownloadLink,
+    drivePath: uploaded.drivePath,
+    uploadStatus: 'uploaded',
+    uploadError: '',
+    uploadedAt: new Date().toISOString(),
+  });
+  io.emit('recording-updated', updated);
+}
+
+async function syncPendingRecordingsToDrive() {
+  if (!isDriveSyncEnabled()) return;
+  const allRecordings = await store.listRecordings(0);
+  const candidates = allRecordings.filter((recording) => {
+    if (!recording.filePath) return false;
+    if (recording.driveFileId) return false;
+    return ['pending', 'failed', 'uploading'].includes(recording.uploadStatus || 'pending');
+  });
+
+  for (const recording of candidates) {
+    try {
+      await archiveRecordingToDrive(recording);
+    } catch (error) {
+      const failed = await store.updateRecording(recording.id, {
+        uploadStatus: 'failed',
+        uploadError: error.message || 'Drive upload failed.',
+      });
+      io.emit('recording-updated', failed);
+    }
+  }
+}
+
+setInterval(() => {
+  runRetentionSweepWithEventLog().catch((error) => {
+    console.error('Retention sweep failed:', error);
+  });
+}, Math.max(5, env.retentionSweepIntervalMinutes) * 60 * 1000);
+
+syncPendingRecordingsToDrive().catch((error) => {
+  console.error('Initial recording sync failed:', error);
+});
+
 io.on('connection', (socket) => {
   console.log(`🟢 Node Connected: ${socket.id}`);
 
   socket.on('register', async ({ id, name, role, sourceType } = {}) => {
-    const node = registerNode(socket.id, { id, name, role, sourceType });
-    console.log(`📋 Registered: ${node.role} "${node.name}" (${node.id})`);
+    try {
+      const node = registerNode(socket.id, { id, name, role, sourceType });
+      console.log(`📋 Registered: ${node.role} "${node.name}" (${node.id})`);
 
-    if (node.role === 'camera') {
-      socket.join(`camera:${node.id}`);
-      await store.markCameraOnline(node.id, node.name, node.sourceType);
-      broadcastCameraStatus();
-    } else {
-      socket.emit('camera-status', { cameras: listOnlineCameras() });
+      if (node.role === 'camera') {
+        const isAuthorized = await store.isCameraAuthorized(node.id);
+        if (!isAuthorized) {
+          socket.emit('camera-registration-denied', {
+            cameraId: node.id,
+            message: 'Camera is not approved by admin.',
+          });
+          removeNode(socket.id);
+          return;
+        }
+
+        socket.join(`camera:${node.id}`);
+        await store.markCameraOnline(node.id, node.name, node.sourceType);
+        broadcastCameraStatus();
+      } else {
+        socket.emit('camera-status', { cameras: listOnlineCameras() });
+      }
+    } catch (error) {
+      console.error('Failed to register node:', error);
     }
   });
 
   socket.on('join-camera-view', ({ cameraId } = {}) => {
     if (!cameraId) return;
-    const current = getViewerCamera(socket.id);
-    if (current && current !== cameraId) {
-      io.to(`camera:${current}`).emit('viewer-left', { viewerSocketId: socket.id, cameraId: current });
-    }
     setViewerCamera(socket.id, cameraId);
-    io.to(`camera:${cameraId}`).emit('viewer-joined', {
+    const payload = {
       viewerSocketId: socket.id,
       cameraId,
-    });
+    };
+    io.to(`camera:${cameraId}`).emit('viewer-joined', payload);
+    io.to(`camera:${cameraId}`).emit('request-camera-offer', payload);
   });
 
   socket.on('leave-camera-view', ({ cameraId } = {}) => {
     if (!cameraId) return;
+    removeViewerCamera(socket.id, cameraId);
     io.to(`camera:${cameraId}`).emit('viewer-left', { viewerSocketId: socket.id, cameraId });
   });
 
@@ -72,6 +165,14 @@ io.on('connection', (socket) => {
   socket.on('camera-answer', ({ cameraId, viewerSocketId, answer } = {}) => {
     if (!cameraId || !viewerSocketId || !answer) return;
     io.to(`camera:${cameraId}`).emit('camera-answer', { viewerSocketId, answer });
+  });
+
+  socket.on('request-camera-offer', ({ cameraId, viewerSocketId } = {}) => {
+    if (!cameraId || !viewerSocketId) return;
+    io.to(`camera:${cameraId}`).emit('request-camera-offer', {
+      cameraId,
+      viewerSocketId,
+    });
   });
 
   socket.on('ice-candidate', ({ cameraId, viewerSocketId, candidate, direction } = {}) => {
@@ -105,9 +206,23 @@ io.on('connection', (socket) => {
       });
 
       io.emit('motion-alert', event);
+      io.emit('camera-motion-status', {
+        cameraId,
+        motionActive: true,
+        at: createdAt,
+      });
     } catch (error) {
       console.error('Failed to process motion alert:', error);
     }
+  });
+
+  socket.on('camera-recording-status', ({ cameraId, recordingActive, at } = {}) => {
+    if (!cameraId || typeof recordingActive !== 'boolean') return;
+    io.emit('camera-recording-status', {
+      cameraId,
+      recordingActive,
+      at: at || new Date().toISOString(),
+    });
   });
 
   socket.on('recording-upload', async (payload = {}) => {
@@ -116,10 +231,12 @@ io.on('connection', (socket) => {
         throw new HttpError(400, 'Invalid recording payload.');
       }
 
-      const { filePath, sizeBytes } = await saveBase64Video(
+      const createdAt = payload.createdAt || new Date().toISOString();
+      const { filePath, sizeBytes, originalFileName } = await saveBase64Video(
         payload.base64Data,
         payload.mimeType || 'video/webm',
-        payload.cameraId
+        payload.cameraId,
+        createdAt
       );
 
       const recording = await store.createRecording({
@@ -127,9 +244,12 @@ io.on('connection', (socket) => {
         cameraName: payload.cameraName,
         trigger: payload.trigger || 'manual',
         filePath,
+        originalFileName,
+        mimeType: payload.mimeType || 'video/webm',
         sizeBytes,
         durationSeconds: payload.durationSeconds || 0,
-        createdAt: payload.createdAt || new Date().toISOString(),
+        createdAt,
+        uploadStatus: isDriveSyncEnabled() ? 'pending' : 'local_only',
       });
 
       await store.createEvent({
@@ -142,16 +262,29 @@ io.on('connection', (socket) => {
       });
 
       io.emit('recording-created', recording);
+
+      archiveRecordingToDrive(recording).catch(async (error) => {
+        console.error('Failed to archive recording to Drive:', error);
+        const failed = await store.updateRecording(recording.id, {
+          uploadStatus: 'failed',
+          uploadError: error.message || 'Drive upload failed.',
+        });
+        io.emit('recording-updated', failed);
+      });
+
+      runRetentionSweepWithEventLog().catch((error) => {
+        console.error('Retention cleanup failed after recording upload:', error);
+      });
     } catch (error) {
       console.error('Failed to save recording upload:', error);
     }
   });
 
   socket.on('disconnect', async () => {
-    const { node, watchingCameraId } = removeNode(socket.id);
+    const { node, watchingCameraIds } = removeNode(socket.id);
     console.log(`🔴 Node Disconnected: ${socket.id}${node ? ` (${node.role} "${node.name}")` : ''}`);
 
-    if (watchingCameraId) {
+    for (const watchingCameraId of watchingCameraIds) {
       io.to(`camera:${watchingCameraId}`).emit('viewer-left', {
         viewerSocketId: socket.id,
         cameraId: watchingCameraId,

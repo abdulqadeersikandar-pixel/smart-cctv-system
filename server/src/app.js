@@ -8,6 +8,7 @@ import cameraRoutes from './routes/camera.routes.js';
 import dashboardRoutes from './routes/dashboard.routes.js';
 import eventRoutes from './routes/event.routes.js';
 import recordingRoutes from './routes/recording.routes.js';
+import { cameraAccessProtectedRoutes, cameraAccessPublicRoutes } from './routes/cameraAccess.routes.js';
 
 const app = express();
 const allowedOrigins = env.clientOrigins;
@@ -30,11 +31,14 @@ app.get('/api/health', (req, res) => {
   });
 });
 
+app.use('/api/camera-access', cameraAccessPublicRoutes);
+
 app.use('/api', authMiddleware);
 app.use('/api/dashboard', dashboardRoutes);
 app.use('/api/cameras', cameraRoutes);
 app.use('/api/events', eventRoutes);
 app.use('/api/recordings', recordingRoutes);
+app.use('/api/camera-access', cameraAccessProtectedRoutes);
 
 app.use(notFoundMiddleware);
 app.use(errorMiddleware);

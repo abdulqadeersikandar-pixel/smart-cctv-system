@@ -18,6 +18,10 @@ export async function getDashboardSummary(req, res) {
     offlineCameras: cameras.filter((camera) => !onlineIds.has(camera.id)).length,
     motionAlerts: events.filter((event) => event.type === 'motion').length,
     recordings: recordings.length,
+    cloudSyncedRecordings: recordings.filter((recording) => recording.uploadStatus === 'uploaded').length,
+    pendingCloudUploads: recordings.filter((recording) =>
+      ['pending', 'uploading', 'failed'].includes(recording.uploadStatus || '')
+    ).length,
     storageUsedBytes,
     systemStatus: onlineCameras.length > 0 ? 'active' : 'idle',
   };

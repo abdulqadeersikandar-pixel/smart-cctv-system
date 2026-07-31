@@ -1,17 +1,14 @@
 import { useCallback, useEffect, useState } from 'react';
 import { apiClient } from '../services/apiClient';
+import { useAppState } from './useAppState';
 
 export function useDashboardData() {
-  const [summary, setSummary] = useState(null);
-  const [cameras, setCameras] = useState([]);
-  const [events, setEvents] = useState([]);
-  const [recordings, setRecordings] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState('');
+  const { state, dispatch } = useAppState();
+  const [refreshTick, setRefreshTick] = useState(0);
 
   const load = useCallback(async () => {
-    setLoading(true);
-    setError('');
+    dispatch({ type: 'DASHBOARD_LOADING', payload: true });
+    dispatch({ type: 'DASHBOARD_ERROR', payload: '' });
     try {
       const [summaryRes, camerasRes, eventsRes, recordingsRes] = await Promise.all([
         apiClient.getDashboardSummary(),
@@ -19,23 +16,27 @@ export function useDashboardData() {
         apiClient.listEvents(),
         apiClient.listRecordings(),
       ]);
-      setSummary(summaryRes.summary);
-      setCameras(camerasRes.cameras);
-      setEvents(eventsRes.events);
-      setRecordings(recordingsRes.recordings);
+      dispatch({
+        type: 'SET_DASHBOARD_DATA',
+        payload: {
+          summary: summaryRes.summary,
+          cameras: camerasRes.cameras,
+          events: eventsRes.events,
+          recordings: recordingsRes.recordings,
+        },
+      });
     } catch (fetchError) {
-      setError(fetchError.message);
-    } finally {
-      setLoading(false);
+      dispatch({ type: 'DASHBOARD_ERROR', payload: fetchError.message });
+      dispatch({ type: 'DASHBOARD_LOADING', payload: false });
     }
-  }, []);
+  }, [dispatch]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
       load();
     }, 0);
     return () => window.clearTimeout(timer);
-  }, [load]);
+  }, [load, refreshTick]);
 
   const addCamera = useCallback(async (payload) => {
     await apiClient.addCamera(payload);
@@ -57,14 +58,18 @@ export function useDashboardData() {
     await load();
   }, [load]);
 
+  const refresh = useCallback(() => {
+    setRefreshTick((value) => value + 1);
+  }, []);
+
   return {
-    summary,
-    cameras,
-    events,
-    recordings,
-    loading,
-    error,
-    refresh: load,
+    summary: state.dashboard.summary,
+    cameras: state.cameras.items,
+    events: state.alerts.events,
+    recordings: state.recordings.items,
+    loading: state.dashboard.loading,
+    error: state.dashboard.error,
+    refresh,
     addCamera,
     updateCamera,
     removeCamera,

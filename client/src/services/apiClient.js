@@ -23,10 +23,10 @@ async function request(path, options = {}) {
   if (!response.ok) {
     let message = `Request failed (${response.status})`;
     try {
-      const body = await response.json();
-      message = body.error || message;
+      const payload = await response.json();
+      message = payload.error || message;
     } catch {
-      // Use default message when body is not JSON.
+      // Keep default fallback message.
     }
     throw new Error(message);
   }
@@ -38,8 +38,7 @@ async function request(path, options = {}) {
 export const apiClient = {
   getDashboardSummary: () => request('/api/dashboard/summary'),
   listCameras: () => request('/api/cameras'),
-  addCamera: (payload) =>
-    request('/api/cameras', { method: 'POST', body: JSON.stringify(payload) }),
+  addCamera: (payload) => request('/api/cameras', { method: 'POST', body: JSON.stringify(payload) }),
   renameCamera: (cameraId, payload) =>
     request(`/api/cameras/${cameraId}`, {
       method: 'PATCH',
@@ -49,4 +48,6 @@ export const apiClient = {
   listEvents: () => request('/api/events'),
   listRecordings: () => request('/api/recordings'),
   deleteRecording: (recordingId) => request(`/api/recordings/${recordingId}`, { method: 'DELETE' }),
+  getRecordingDownloadUrl: (recordingId, source = 'auto') =>
+    `${env.serverUrl}/api/recordings/${recordingId}/download?source=${source}`,
 };

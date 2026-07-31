@@ -23,4 +23,9 @@ export const env = {
   firebaseClientEmail: process.env.FIREBASE_CLIENT_EMAIL || '',
   firebasePrivateKey: process.env.FIREBASE_PRIVATE_KEY || '',
   localStorageRoot: process.env.LOCAL_STORAGE_ROOT || 'storage',
+  googleServiceAccountKeyPath: process.env.GOOGLE_SERVICE_ACCOUNT_KEY_PATH || '',
+  googleDriveFolderId: process.env.GOOGLE_DRIVE_FOLDER_ID || '',
+  recordingsRetentionDays: Number(process.env.RECORDINGS_RETENTION_DAYS || 30),
+  retentionSweepIntervalMinutes: Number(process.env.RETENTION_SWEEP_INTERVAL_MINUTES || 60),
+  cameraInviteCodeExpiryMinutes: Number(process.env.CAMERA_INVITE_CODE_EXPIRY_MINUTES || 15),
 };

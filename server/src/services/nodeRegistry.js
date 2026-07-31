@@ -14,19 +14,31 @@ export function registerNode(socketId, { id, name, role, sourceType }) {
 }
 
 export function setViewerCamera(socketId, cameraId) {
-  viewerCameraMap.set(socketId, cameraId);
+  const watched = viewerCameraMap.get(socketId) || new Set();
+  watched.add(cameraId);
+  viewerCameraMap.set(socketId, watched);
 }
 
 export function getViewerCamera(socketId) {
-  return viewerCameraMap.get(socketId) || null;
+  const watched = viewerCameraMap.get(socketId) || new Set();
+  return Array.from(watched);
+}
+
+export function removeViewerCamera(socketId, cameraId) {
+  const watched = viewerCameraMap.get(socketId);
+  if (!watched) return;
+  watched.delete(cameraId);
+  if (watched.size === 0) {
+    viewerCameraMap.delete(socketId);
+  }
 }
 
 export function removeNode(socketId) {
   const node = nodes.get(socketId) || null;
   nodes.delete(socketId);
-  const watchingCameraId = viewerCameraMap.get(socketId) || null;
+  const watchingCameraIds = Array.from(viewerCameraMap.get(socketId) || []);
   viewerCameraMap.delete(socketId);
-  return { node, watchingCameraId };
+  return { node, watchingCameraIds };
 }
 
 export function listOnlineCameras() {

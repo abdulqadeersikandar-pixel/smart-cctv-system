@@ -1,28 +1,58 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createRealtimeConnection } from '../services/realtime';
+import { useAppState } from './useAppState';
 
-export function useViewerStream(selectedCameraId, onRealtimeUpdate) {
-  const videoRef = useRef(null);
+function ensurePeerConnection(peersRef, cameraId, socket) {
+  const existing = peersRef.current.get(cameraId);
+  if (existing) return existing;
+
+  const pc = new RTCPeerConnection({
+    iceServers: [
+      { urls: 'stun:stun.l.google.com:19302' },
+      { urls: 'stun:stun1.l.google.com:19302' },
+    ],
+  });
+
+  pc.onicecandidate = (event) => {
+    if (!event.candidate || !socket.id) return;
+    socket.emit('ice-candidate', {
+      cameraId,
+      viewerSocketId: socket.id,
+      candidate: event.candidate,
+      direction: 'viewer-to-camera',
+    });
+  };
+
+  peersRef.current.set(cameraId, pc);
+  return pc;
+}
+
+export function useViewerStream(selectedCameraIds, onRealtimeUpdate) {
+  const { state, dispatch } = useAppState();
   const socketRef = useRef(null);
-  const peerConnectionRef = useRef(null);
-  const selectedCameraRef = useRef(selectedCameraId);
-  const [streamActive, setStreamActive] = useState(false);
+  const peersRef = useRef(new Map());
+  const streamByCameraRef = useRef(new Map());
+  const [streamVersion, setStreamVersion] = useState(0);
   const [isMuted, setIsMuted] = useState(true);
-  const [onlineCameras, setOnlineCameras] = useState([]);
-  const [lastMotionAlert, setLastMotionAlert] = useState(null);
+  const selectedRef = useRef(selectedCameraIds);
+  const reconnectProbeRef = useRef(null);
+  const videoElementsRef = useRef(new Map());
+  const previousSelectedRef = useRef([]);
 
   useEffect(() => {
-    selectedCameraRef.current = selectedCameraId;
-  }, [selectedCameraId]);
+    selectedRef.current = selectedCameraIds;
+  }, [selectedCameraIds]);
+
+  const reconnectCamera = useCallback((cameraId) => {
+    const socket = socketRef.current;
+    if (!socket?.connected || !cameraId) return;
+    socket.emit('join-camera-view', { cameraId });
+    socket.emit('request-camera-offer', { cameraId, viewerSocketId: socket.id });
+  }, []);
 
   useEffect(() => {
     const socket = createRealtimeConnection();
     socketRef.current = socket;
-
-    const pc = new RTCPeerConnection({
-      iceServers: [{ urls: 'stun:stun.l.google.com:19302' }],
-    });
-    peerConnectionRef.current = pc;
 
     socket.on('connect', () => {
       socket.emit('register', {
@@ -30,30 +60,34 @@ export function useViewerStream(selectedCameraId, onRealtimeUpdate) {
         name: 'Dashboard Viewer',
         role: 'viewer',
       });
-      if (selectedCameraRef.current) {
-        socket.emit('join-camera-view', { cameraId: selectedCameraRef.current });
-      }
+      selectedRef.current.forEach((cameraId) => reconnectCamera(cameraId));
     });
 
-    pc.ontrack = (event) => {
-      if (videoRef.current) {
-        videoRef.current.srcObject = event.streams[0];
-        setStreamActive(true);
-      }
-    };
-
-    pc.onicecandidate = (event) => {
-      if (!event.candidate || !selectedCameraRef.current) return;
-      socket.emit('ice-candidate', {
-        cameraId: selectedCameraRef.current,
-        viewerSocketId: socket.id,
-        candidate: event.candidate,
-        direction: 'viewer-to-camera',
-      });
-    };
+    socket.on('camera-status', ({ cameras }) => {
+      dispatch({ type: 'SET_ONLINE_CAMERAS', payload: cameras });
+    });
 
     socket.on('camera-offer', async ({ offer, cameraId }) => {
-      if (!selectedCameraRef.current || cameraId !== selectedCameraRef.current) return;
+      if (!selectedRef.current.includes(cameraId)) return;
+
+      const pc = ensurePeerConnection(peersRef, cameraId, socket);
+      pc.ontrack = (event) => {
+        streamByCameraRef.current.set(cameraId, event.streams[0]);
+        const videoEl = videoElementsRef.current.get(cameraId);
+        if (videoEl) {
+          videoEl.srcObject = event.streams[0];
+        }
+        dispatch({
+          type: 'SET_STREAM_STATE',
+          payload: { cameraId, value: { streamActive: true, updatedAt: new Date().toISOString() } },
+        });
+        setStreamVersion((value) => value + 1);
+      };
+
+      if (pc.signalingState !== 'stable') {
+        await pc.setLocalDescription({ type: 'rollback' }).catch(() => {});
+      }
+
       await pc.setRemoteDescription(new RTCSessionDescription(offer));
       const answer = await pc.createAnswer();
       await pc.setLocalDescription(answer);
@@ -64,78 +98,165 @@ export function useViewerStream(selectedCameraId, onRealtimeUpdate) {
       });
     });
 
-    socket.on('ice-candidate', async ({ candidate, cameraId, direction }) => {
-      if (!selectedCameraRef.current || cameraId !== selectedCameraRef.current || direction !== 'camera-to-viewer') return;
+    socket.on('ice-candidate', async ({ cameraId, candidate, direction }) => {
+      if (direction !== 'camera-to-viewer') return;
+      const pc = peersRef.current.get(cameraId);
+      if (!pc) return;
       await pc.addIceCandidate(new RTCIceCandidate(candidate));
     });
 
-    socket.on('camera-status', ({ cameras }) => {
-      setOnlineCameras(cameras);
+    socket.on('viewer-left', ({ cameraId }) => {
+      const pc = peersRef.current.get(cameraId);
+      if (pc) {
+        pc.close();
+        peersRef.current.delete(cameraId);
+      }
+      streamByCameraRef.current.delete(cameraId);
+      dispatch({
+        type: 'SET_STREAM_STATE',
+        payload: { cameraId, value: { streamActive: false } },
+      });
+      setStreamVersion((value) => value + 1);
     });
 
     socket.on('motion-alert', (event) => {
-      setLastMotionAlert(event);
+      dispatch({
+        type: 'SET_LAST_MOTION_ALERT',
+        payload: { alert: event, cameraId: event.cameraId, motionActive: true },
+      });
+      window.setTimeout(() => {
+        dispatch({
+          type: 'SET_LAST_MOTION_ALERT',
+          payload: { alert: event, cameraId: event.cameraId, motionActive: false },
+        });
+      }, 6000);
       onRealtimeUpdate?.();
     });
 
-    socket.on('recording-created', () => {
+    socket.on('camera-recording-status', ({ cameraId, recordingActive, at }) => {
+      dispatch({
+        type: 'SET_STREAM_STATE',
+        payload: { cameraId, value: { recordingActive, recordingUpdatedAt: at } },
+      });
+    });
+
+    socket.on('recording-created', (recording) => {
+      dispatch({ type: 'UPSERT_RECORDING', payload: recording });
       onRealtimeUpdate?.();
     });
+
+    socket.on('recording-updated', (recording) => {
+      dispatch({ type: 'UPSERT_RECORDING', payload: recording });
+    });
+
+    reconnectProbeRef.current = window.setInterval(() => {
+      selectedRef.current.forEach((cameraId) => {
+        const stream = streamByCameraRef.current.get(cameraId);
+        const active = Boolean(stream?.active);
+        if (!active) {
+          reconnectCamera(cameraId);
+        }
+      });
+    }, 6000);
 
     return () => {
-      if (selectedCameraRef.current) {
-        socket.emit('leave-camera-view', { cameraId: selectedCameraRef.current });
+      if (reconnectProbeRef.current) {
+        clearInterval(reconnectProbeRef.current);
       }
+      selectedRef.current.forEach((cameraId) => {
+        socket.emit('leave-camera-view', { cameraId });
+      });
+      peersRef.current.forEach((pc) => pc.close());
+      peersRef.current.clear();
+      streamByCameraRef.current.clear();
       socket.disconnect();
-      pc.close();
     };
-  }, [onRealtimeUpdate]);
+  }, [dispatch, onRealtimeUpdate, reconnectCamera]);
 
   useEffect(() => {
     const socket = socketRef.current;
-    if (!socket || !selectedCameraId) return;
-    setStreamActive(false);
-    socket.emit('join-camera-view', { cameraId: selectedCameraId });
+    if (!socket?.connected) return;
 
-    return () => {
-      socket.emit('leave-camera-view', { cameraId: selectedCameraId });
-    };
-  }, [selectedCameraId]);
+    const previous = new Set(previousSelectedRef.current);
+    const next = new Set(selectedCameraIds);
+
+    selectedCameraIds.forEach((cameraId) => {
+      if (!previous.has(cameraId)) {
+        reconnectCamera(cameraId);
+      }
+    });
+
+    previous.forEach((cameraId) => {
+      if (!next.has(cameraId)) {
+        socket.emit('leave-camera-view', { cameraId });
+        const pc = peersRef.current.get(cameraId);
+        if (pc) pc.close();
+        peersRef.current.delete(cameraId);
+        streamByCameraRef.current.delete(cameraId);
+        const videoEl = videoElementsRef.current.get(cameraId);
+        if (videoEl) {
+          videoEl.srcObject = null;
+        }
+      }
+    });
+    previousSelectedRef.current = selectedCameraIds;
+  }, [selectedCameraIds, reconnectCamera]);
 
   function toggleMute() {
-    if (!videoRef.current) return;
-    const next = !isMuted;
-    videoRef.current.muted = next;
-    setIsMuted(next);
+    setIsMuted((value) => !value);
   }
 
-  function takeScreenshot() {
-    if (!videoRef.current) return null;
+  const streamEntries = useMemo(() => {
+    const entries = [];
+    for (const [cameraId, mediaStream] of streamByCameraRef.current.entries()) {
+      entries.push({ cameraId, mediaStream });
+    }
+    return entries;
+  }, [streamVersion]);
+
+  function bindVideoElement(cameraId, element) {
+    if (!cameraId) return;
+    if (!element) {
+      videoElementsRef.current.delete(cameraId);
+      return;
+    }
+    videoElementsRef.current.set(cameraId, element);
+    const stream = streamByCameraRef.current.get(cameraId);
+    if (stream) {
+      element.srcObject = stream;
+    }
+  }
+
+  function takeScreenshot(cameraId) {
+    const element = videoElementsRef.current.get(cameraId);
+    if (!element || !element.videoWidth || !element.videoHeight) return null;
     const canvas = document.createElement('canvas');
-    canvas.width = videoRef.current.videoWidth || 1280;
-    canvas.height = videoRef.current.videoHeight || 720;
+    canvas.width = element.videoWidth;
+    canvas.height = element.videoHeight;
     const context = canvas.getContext('2d');
-    context.drawImage(videoRef.current, 0, 0, canvas.width, canvas.height);
+    context.drawImage(element, 0, 0, canvas.width, canvas.height);
     return canvas.toDataURL('image/jpeg', 0.9);
   }
 
-  async function toggleFullscreen() {
-    if (!videoRef.current) return;
+  async function requestFullscreen(element) {
+    if (!element) return;
     if (document.fullscreenElement) {
       await document.exitFullscreen();
       return;
     }
-    await videoRef.current.requestFullscreen();
+    await element.requestFullscreen();
   }
 
   return {
-    videoRef,
-    streamActive,
+    streamEntries,
+    onlineCameras: state.cameras.online,
+    lastMotionAlert: state.alerts.lastMotionAlert,
+    motionByCamera: state.alerts.motionByCamera,
+    streamStateByCamera: state.streams.byCamera,
     isMuted,
-    onlineCameras,
-    lastMotionAlert,
     toggleMute,
     takeScreenshot,
-    toggleFullscreen,
+    requestFullscreen,
+    bindVideoElement,
   };
 }

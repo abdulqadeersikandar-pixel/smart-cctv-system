@@ -17,6 +17,8 @@ export default function CameraStream() {
   const [sourceType, setSourceType] = useState('phone');
   const [motionDetected, setMotionDetected] = useState(false);
   const [isRecording, setIsRecording] = useState(false);
+  const [connectionStatus, setConnectionStatus] = useState('connecting');
+  const [registrationError, setRegistrationError] = useState('');
 
   const videoRef = useRef(null);
   const canvasRef = useRef(null);
@@ -58,6 +60,11 @@ export default function CameraStream() {
       recorder.onstop = async () => {
         isRecordingRef.current = false;
         setIsRecording(false);
+        socketRef.current?.emit('camera-recording-status', {
+          cameraId: effectiveCameraId,
+          recordingActive: false,
+          at: new Date().toISOString(),
+        });
         const blob = new Blob(recordingChunksRef.current, { type: recorder.mimeType });
         const arrayBuffer = await blob.arrayBuffer();
         const base64Data = arrayBufferToBase64(arrayBuffer);
@@ -79,6 +86,11 @@ export default function CameraStream() {
       recorder.start(1000);
       isRecordingRef.current = true;
       setIsRecording(true);
+      socketRef.current?.emit('camera-recording-status', {
+        cameraId: effectiveCameraId,
+        recordingActive: true,
+        at: new Date().toISOString(),
+      });
 
       if (autoStopAfterMs > 0) {
         window.setTimeout(stopRecording, autoStopAfterMs);
@@ -141,6 +153,8 @@ export default function CameraStream() {
     const peers = peerConnectionsRef.current;
 
     socket.on('connect', () => {
+      setConnectionStatus('connected');
+      setRegistrationError('');
       socket.emit('register', {
         id: effectiveCameraId,
         name: cameraName,
@@ -149,8 +163,28 @@ export default function CameraStream() {
       });
     });
 
-    socket.on('viewer-joined', async ({ viewerSocketId, cameraId: targetCameraId }) => {
+    socket.on('disconnect', () => {
+      setConnectionStatus('disconnected');
+    });
+
+    socket.on('connect_error', () => {
+      setConnectionStatus('reconnecting');
+    });
+
+    socket.on('camera-registration-denied', ({ message }) => {
+      setRegistrationError(message || 'Camera registration denied by admin.');
+      setConnectionStatus('denied');
+      socket.disconnect();
+    });
+
+    const handleViewerJoined = async ({ viewerSocketId, cameraId: targetCameraId }) => {
       if (targetCameraId !== effectiveCameraId || !streamRef.current) return;
+
+      const previous = peers.get(viewerSocketId);
+      if (previous) {
+        previous.close();
+        peers.delete(viewerSocketId);
+      }
 
       const peer = new RTCPeerConnection({
         iceServers: [{ urls: 'stun:stun.l.google.com:19302' }],
@@ -171,7 +205,10 @@ export default function CameraStream() {
         });
       };
 
-      const offer = await peer.createOffer();
+      const offer = await peer.createOffer({
+        offerToReceiveAudio: false,
+        offerToReceiveVideo: false,
+      });
       await peer.setLocalDescription(offer);
 
       socket.emit('camera-offer', {
@@ -179,7 +216,10 @@ export default function CameraStream() {
         viewerSocketId,
         offer,
       });
-    });
+    };
+
+    socket.on('viewer-joined', handleViewerJoined);
+    socket.on('request-camera-offer', handleViewerJoined);
 
     socket.on('camera-answer', async ({ viewerSocketId, answer }) => {
       const peer = peers.get(viewerSocketId);
@@ -203,6 +243,15 @@ export default function CameraStream() {
     });
 
     let motionIntervalId;
+    const heartbeatId = window.setInterval(() => {
+      if (!socket.connected) return;
+      socket.emit('register', {
+        id: effectiveCameraId,
+        name: cameraName,
+        role: 'camera',
+        sourceType,
+      });
+    }, 20000);
 
     navigator.mediaDevices
       .getUserMedia({
@@ -234,6 +283,7 @@ export default function CameraStream() {
       if (motionResetTimerRef.current) {
         clearTimeout(motionResetTimerRef.current);
       }
+      clearInterval(heartbeatId);
       stopRecording();
       peers.forEach((peer) => peer.close());
       peers.clear();
@@ -249,6 +299,10 @@ export default function CameraStream() {
           <h1 className="text-2xl font-bold text-primary-500">Camera Node Console</h1>
           <p className="mt-1 text-sm text-gray-400">
             Use this page on Samsung J3 Pro now; switch to USB/IP camera source later without dashboard changes.
+          </p>
+          <p className="mt-1 text-xs text-gray-400">
+            Connection: <span className="font-semibold">{connectionStatus}</span>
+            {registrationError ? ` · ${registrationError}` : ''}
           </p>
 
           <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-3">
