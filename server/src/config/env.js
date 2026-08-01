@@ -13,6 +13,19 @@ function parseOrigins(value) {
     .filter(Boolean);
 }
 
+function parseIceServers(value) {
+  if (!value) return [];
+  try {
+    // Accept JSON array or comma separated host:port:user:pass entries (simple)
+    const parsed = JSON.parse(value);
+    if (Array.isArray(parsed)) return parsed;
+  } catch (e) {
+    // fallback to comma-separated STUN/TURN entries (not full RTC config)
+    return value.split(',').map((s) => s.trim()).filter(Boolean).map((url) => ({ urls: url }));
+  }
+  return [];
+}
+
 export const env = {
   nodeEnv: process.env.NODE_ENV || 'development',
   port: Number(process.env.PORT || 5000),
@@ -28,4 +41,8 @@ export const env = {
   recordingsRetentionDays: Number(process.env.RECORDINGS_RETENTION_DAYS || 30),
   retentionSweepIntervalMinutes: Number(process.env.RETENTION_SWEEP_INTERVAL_MINUTES || 60),
   cameraInviteCodeExpiryMinutes: Number(process.env.CAMERA_INVITE_CODE_EXPIRY_MINUTES || 15),
+  // Admin secret header to protect manual admin endpoints (set in production)
+  adminSecret: process.env.ADMIN_SECRET || '',
+  // ICE servers config for WebRTC (JSON array or comma-separated URLs)
+  iceServers: parseIceServers(process.env.ICE_SERVERS || ''),
 };

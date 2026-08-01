@@ -16,7 +16,10 @@ const allowedOrigins = env.clientOrigins;
 app.use(
   cors({
     origin: allowedOrigins,
-    methods: ['GET', 'POST', 'PATCH', 'DELETE'],
+    methods: ['GET', 'POST', 'PATCH', 'DELETE', 'OPTIONS'],
+    credentials: true,
+    allowedHeaders: ['Content-Type', 'Authorization', 'x-admin-secret'],
+    optionsSuccessStatus: 204,
   })
 );
 app.use(express.json({ limit: '30mb' }));

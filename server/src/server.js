@@ -25,8 +25,42 @@ const httpServer = createServer(app);
 const io = new Server(httpServer, {
   cors: {
     origin: allowedOrigins,
-    methods: ['GET', 'POST'],
+    methods: ['GET', 'POST', 'PATCH', 'DELETE', 'OPTIONS'],
+    credentials: true,
+    allowedHeaders: ['Content-Type', 'Authorization', 'x-admin-secret'],
   },
+});
+n// Admin and helper endpoints (protected with ADMIN_SECRET header if set)
+app.get('/api/webrtc/config', (req, res) => {
+  const config = { iceServers: env.iceServers || [] };
+  res.json(config);
+});
+napp.post('/api/admin/sync-pending', async (req, res) => {
+  const adminHeader = req.headers['x-admin-secret'] || '';
+  if (env.adminSecret && adminHeader !== env.adminSecret) {
+    return res.status(403).json({ error: 'Forbidden' });
+  }
+  try {
+    await syncPendingRecordingsToDrive();
+    return res.json({ ok: true, message: 'Sync started' });
+  } catch (error) {
+    console.error('Manual sync failed:', error);
+    return res.status(500).json({ ok: false, error: error.message });
+  }
+});
+
+app.post('/api/admin/run-retention', async (req, res) => {
+  const adminHeader = req.headers['x-admin-secret'] || '';
+  if (env.adminSecret && adminHeader !== env.adminSecret) {
+    return res.status(403).json({ error: 'Forbidden' });
+  }
+  try {
+    await runRetentionSweepWithEventLog();
+    return res.json({ ok: true, message: 'Retention sweep executed' });
+  } catch (error) {
+    console.error('Manual retention sweep failed:', error);
+    return res.status(500).json({ ok: false, error: error.message });
+  }
 });
 
 function broadcastCameraStatus() {
