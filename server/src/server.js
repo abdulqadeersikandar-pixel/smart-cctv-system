@@ -30,12 +30,14 @@ const io = new Server(httpServer, {
     allowedHeaders: ['Content-Type', 'Authorization', 'x-admin-secret'],
   },
 });
-n// Admin and helper endpoints (protected with ADMIN_SECRET header if set)
+
+// Admin and helper endpoints (protected with ADMIN_SECRET header if set)
 app.get('/api/webrtc/config', (req, res) => {
   const config = { iceServers: env.iceServers || [] };
   res.json(config);
 });
-napp.post('/api/admin/sync-pending', async (req, res) => {
+
+app.post('/api/admin/sync-pending', async (req, res) => {
   const adminHeader = req.headers['x-admin-secret'] || '';
   if (env.adminSecret && adminHeader !== env.adminSecret) {
     return res.status(403).json({ error: 'Forbidden' });
@@ -346,3 +348,4 @@ const PORT = env.port;
 httpServer.listen(PORT, () => {
   console.log(`🚀 Cloud Backend is running on http://localhost:${PORT}`);
 });
+
