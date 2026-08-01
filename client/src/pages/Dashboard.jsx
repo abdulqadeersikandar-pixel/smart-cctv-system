@@ -17,7 +17,7 @@ import StatCard from '../components/dashboard/StatCard';
 import { useDashboardData } from '../hooks/useDashboardData';
 import { useViewerStream } from '../hooks/useViewerStream';
 import { useAuth } from '../hooks/useAuth';
-import { useAppState } from '../contexts/AppStateContext';
+import { useAppState } from '../hooks/useAppState';
 import { apiClient } from '../services/apiClient';
 
 function formatBytes(bytes) {

@@ -37,6 +37,7 @@ export const env = {
   firebasePrivateKey: process.env.FIREBASE_PRIVATE_KEY || '',
   localStorageRoot: process.env.LOCAL_STORAGE_ROOT || 'storage',
   googleServiceAccountKeyPath: process.env.GOOGLE_SERVICE_ACCOUNT_KEY_PATH || '',
+  googleServiceAccountJson: process.env.GOOGLE_SERVICE_ACCOUNT_JSON || '',
   googleDriveFolderId: process.env.GOOGLE_DRIVE_FOLDER_ID || '',
   recordingsRetentionDays: Number(process.env.RECORDINGS_RETENTION_DAYS || 30),
   retentionSweepIntervalMinutes: Number(process.env.RETENTION_SWEEP_INTERVAL_MINUTES || 60),

@@ -24,6 +24,7 @@ app.use(
 );
 app.use(express.json({ limit: '30mb' }));
 app.use('/storage', express.static(path.resolve(process.cwd(), env.localStorageRoot)));
+app.use('/recordings', express.static(path.resolve(process.cwd(), env.localStorageRoot, 'recordings')));
 
 app.get('/api/health', (req, res) => {
   res.json({

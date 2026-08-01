@@ -12,13 +12,14 @@ function arrayBufferToBase64(buffer) {
 }
 
 export default function CameraStream() {
-  const [cameraName, setCameraName] = useState('Samsung J3 Pro - Front Door');
-  const [cameraId, setCameraId] = useState('j3-front-door');
+  const [cameraName, setCameraName] = useState('');
+  const [cameraId, setCameraId] = useState('');
   const [sourceType, setSourceType] = useState('phone');
   const [motionDetected, setMotionDetected] = useState(false);
   const [isRecording, setIsRecording] = useState(false);
   const [connectionStatus, setConnectionStatus] = useState('connecting');
   const [registrationError, setRegistrationError] = useState('');
+  const [isRegistered, setIsRegistered] = useState(false);
 
   const videoRef = useRef(null);
   const canvasRef = useRef(null);
@@ -32,7 +33,25 @@ export default function CameraStream() {
   const recordingStartedAtRef = useRef(null);
   const isRecordingRef = useRef(false);
 
-  const effectiveCameraId = useMemo(() => cameraId.trim() || 'camera-node', [cameraId]);
+  const effectiveCameraId = useMemo(() => cameraId.trim(), [cameraId]);
+  const effectiveCameraName = useMemo(() => cameraName.trim(), [cameraName]);
+
+  const registerCameraNode = useCallback(() => {
+    if (!effectiveCameraId || !effectiveCameraName) {
+      setRegistrationError('Enter camera name and camera ID, then click Connect Camera.');
+      return;
+    }
+    setRegistrationError('');
+    setIsRegistered(true);
+    if (socketRef.current?.connected) {
+      socketRef.current.emit('register', {
+        id: effectiveCameraId,
+        name: effectiveCameraName,
+        role: 'camera',
+        sourceType,
+      });
+    }
+  }, [effectiveCameraId, effectiveCameraName, sourceType]);
 
   const stopRecording = useCallback(() => {
     if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
@@ -43,6 +62,10 @@ export default function CameraStream() {
 
   const startRecording = useCallback(
     async (trigger = 'manual', autoStopAfterMs = 0) => {
+      if (!isRegistered || !effectiveCameraId || !effectiveCameraName) {
+        setRegistrationError('Connect camera first, then start recording.');
+        return;
+      }
       if (!streamRef.current || isRecordingRef.current) return;
       const recorder = new MediaRecorder(streamRef.current, {
         mimeType: 'video/webm;codecs=vp8',
@@ -73,7 +96,7 @@ export default function CameraStream() {
 
         socketRef.current?.emit('recording-upload', {
           cameraId: effectiveCameraId,
-          cameraName,
+          cameraName: effectiveCameraName,
           trigger,
           mimeType: recorder.mimeType,
           base64Data,
@@ -96,7 +119,7 @@ export default function CameraStream() {
         window.setTimeout(stopRecording, autoStopAfterMs);
       }
     },
-    [cameraName, effectiveCameraId, stopRecording]
+    [effectiveCameraId, effectiveCameraName, isRegistered, stopRecording]
   );
 
   const detectMotion = useCallback(() => {
@@ -133,7 +156,7 @@ export default function CameraStream() {
 
         socketRef.current?.emit('motion-alert', {
           cameraId: effectiveCameraId,
-          cameraName,
+          cameraName: effectiveCameraName,
           screenshotDataUrl: canvas.toDataURL('image/jpeg', 0.7),
           createdAt: new Date().toISOString(),
         });
@@ -145,7 +168,7 @@ export default function CameraStream() {
     }
 
     prevFrameRef.current = new Uint8ClampedArray(frameData);
-  }, [cameraName, effectiveCameraId, startRecording]);
+  }, [effectiveCameraId, effectiveCameraName, startRecording]);
 
   useEffect(() => {
     const socket = createRealtimeConnection();
@@ -155,12 +178,14 @@ export default function CameraStream() {
     socket.on('connect', () => {
       setConnectionStatus('connected');
       setRegistrationError('');
-      socket.emit('register', {
-        id: effectiveCameraId,
-        name: cameraName,
-        role: 'camera',
-        sourceType,
-      });
+      if (isRegistered && effectiveCameraId && effectiveCameraName) {
+        socket.emit('register', {
+          id: effectiveCameraId,
+          name: effectiveCameraName,
+          role: 'camera',
+          sourceType,
+        });
+      }
     });
 
     socket.on('disconnect', () => {
@@ -245,9 +270,10 @@ export default function CameraStream() {
     let motionIntervalId;
     const heartbeatId = window.setInterval(() => {
       if (!socket.connected) return;
+      if (!isRegistered || !effectiveCameraId || !effectiveCameraName) return;
       socket.emit('register', {
         id: effectiveCameraId,
-        name: cameraName,
+        name: effectiveCameraName,
         role: 'camera',
         sourceType,
       });
@@ -290,7 +316,7 @@ export default function CameraStream() {
       streamRef.current?.getTracks().forEach((track) => track.stop());
       socket.disconnect();
     };
-  }, [cameraName, detectMotion, effectiveCameraId, sourceType, stopRecording]);
+  }, [detectMotion, effectiveCameraId, effectiveCameraName, isRegistered, sourceType, stopRecording]);
 
   return (
     <div className="min-h-screen bg-dark-900 p-4 text-white md:p-8">
@@ -327,6 +353,15 @@ export default function CameraStream() {
               <option value="usb">USB Camera</option>
               <option value="ip">IP Camera</option>
             </select>
+          </div>
+          <div className="mt-3">
+            <button
+              type="button"
+              className="rounded-lg bg-primary-600 px-4 py-2 text-sm font-semibold hover:bg-primary-500"
+              onClick={registerCameraNode}
+            >
+              Connect Camera
+            </button>
           </div>
         </div>
 

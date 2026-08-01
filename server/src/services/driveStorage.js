@@ -6,22 +6,37 @@ import { env } from '../config/env.js';
 let driveClient = null;
 
 function hasDriveConfig() {
-  return Boolean(env.googleServiceAccountKeyPath && env.googleDriveFolderId);
+  return Boolean((env.googleServiceAccountKeyPath || env.googleServiceAccountJson) && env.googleDriveFolderId);
 }
 
 function getDriveClient() {
   if (driveClient) return driveClient;
   if (!hasDriveConfig()) return null;
 
-  const keyPath = path.resolve(process.cwd(), env.googleServiceAccountKeyPath);
-  if (!fs.existsSync(keyPath)) {
-    throw new Error(`Google service account key not found at ${keyPath}`);
-  }
+  const scopes = ['https://www.googleapis.com/auth/drive.file'];
+  let auth;
 
-  const auth = new google.auth.GoogleAuth({
-    keyFile: keyPath,
-    scopes: ['https://www.googleapis.com/auth/drive.file'],
-  });
+  if (env.googleServiceAccountJson) {
+    let credentials;
+    try {
+      credentials = JSON.parse(env.googleServiceAccountJson);
+    } catch (error) {
+      throw new Error('GOOGLE_SERVICE_ACCOUNT_JSON is not valid JSON.');
+    }
+    auth = new google.auth.GoogleAuth({
+      credentials,
+      scopes,
+    });
+  } else {
+    const keyPath = path.resolve(process.cwd(), env.googleServiceAccountKeyPath);
+    if (!fs.existsSync(keyPath)) {
+      throw new Error(`Google service account key not found at ${keyPath}`);
+    }
+    auth = new google.auth.GoogleAuth({
+      keyFile: keyPath,
+      scopes,
+    });
+  }
 
   driveClient = google.drive({ version: 'v3', auth });
   return driveClient;
