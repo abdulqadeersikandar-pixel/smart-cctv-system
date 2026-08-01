@@ -55,7 +55,8 @@ export function useViewerStream(selectedCameraIds, onRealtimeUpdate) {
   useEffect(() => {
       const socket = createRealtimeConnection();
     socketRef.current = socket;
-n    // try to fetch ICE server config from backend so TURN/STUN can be configured centrally
+
+    // try to fetch ICE server config from backend so TURN/STUN can be configured centrally
 
     socket.on('connect', async () => {
       // fetch server side webrtc config (iceServers)
@@ -79,7 +80,8 @@ export function useViewerStream(selectedCameraIds, onRealtimeUpdate) {
       });
       selectedRef.current.forEach((cameraId) => reconnectCamera(cameraId));
     });
-n    // helper to expose ice servers to ensurePeerConnection
+
+    // helper to expose ice servers to ensurePeerConnection
     function getIceServers() {
       return iceServersRef.current || [];
     }
@@ -282,3 +284,4 @@ export function useViewerStream(selectedCameraIds, onRealtimeUpdate) {
     bindVideoElement,
   };
 }
+
