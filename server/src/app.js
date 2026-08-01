@@ -34,6 +34,10 @@ app.get('/api/health', (req, res) => {
   });
 });
 
+app.get('/api/webrtc/config', (req, res) => {
+  res.json({ iceServers: env.iceServers || [] });
+});
+
 app.use('/api/camera-access', cameraAccessPublicRoutes);
 
 app.use('/api', authMiddleware);
