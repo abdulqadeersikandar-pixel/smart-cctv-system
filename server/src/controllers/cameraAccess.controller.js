@@ -49,16 +49,21 @@ export async function requestCameraAccess(req, res) {
 
   await store.consumeCameraInviteCode(payload.inviteCode, payload.cameraId);
   const request = await store.createCameraRequest(payload);
+  const approvedRequest = await store.updateCameraRequestStatus(request.id, {
+    status: 'approved',
+    reviewedBy: 'pin-verification',
+  });
+  const camera = await store.upsertApprovedCameraFromRequest(approvedRequest);
   await store.createEvent({
     type: 'system',
     cameraId: payload.cameraId,
     cameraName: payload.cameraName,
-    message: 'Camera access request submitted and waiting for admin approval.',
+    message: 'Camera linked successfully with invite PIN.',
     severity: 'info',
     createdAt: new Date().toISOString(),
   });
 
-  res.status(201).json({ cameraRequest: request });
+  res.status(201).json({ cameraRequest: approvedRequest, camera });
 }
 
 export async function getCameraAccessRequestStatus(req, res) {

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Activity, CircleDot, Dot, ShieldCheck, Video } from 'lucide-react';
 import { createRealtimeConnection } from '../services/realtime';
+import { apiClient } from '../services/apiClient';
 
 function arrayBufferToBase64(buffer) {
   const bytes = new Uint8Array(buffer);
@@ -20,6 +21,8 @@ export default function CameraStream() {
   const [connectionStatus, setConnectionStatus] = useState('connecting');
   const [registrationError, setRegistrationError] = useState('');
   const [isRegistered, setIsRegistered] = useState(false);
+  const [inviteCode, setInviteCode] = useState('');
+  const [isConnectingCamera, setIsConnectingCamera] = useState(false);
 
   const videoRef = useRef(null);
   const canvasRef = useRef(null);
@@ -36,22 +39,41 @@ export default function CameraStream() {
   const effectiveCameraId = useMemo(() => cameraId.trim(), [cameraId]);
   const effectiveCameraName = useMemo(() => cameraName.trim(), [cameraName]);
 
-  const registerCameraNode = useCallback(() => {
+  const registerCameraNode = useCallback(async () => {
     if (!effectiveCameraId || !effectiveCameraName) {
-      setRegistrationError('Enter camera name and camera ID, then click Connect Camera.');
+      setRegistrationError('Enter camera name and camera ID.');
       return;
     }
-    setRegistrationError('');
-    setIsRegistered(true);
-    if (socketRef.current?.connected) {
-      socketRef.current.emit('register', {
-        id: effectiveCameraId,
-        name: effectiveCameraName,
-        role: 'camera',
-        sourceType,
-      });
+    if (!inviteCode.trim()) {
+      setRegistrationError('Enter dashboard PIN first.');
+      return;
     }
-  }, [effectiveCameraId, effectiveCameraName, sourceType]);
+
+    setIsConnectingCamera(true);
+    setRegistrationError('');
+    try {
+      await apiClient.requestCameraAccess({
+        cameraId: effectiveCameraId,
+        cameraName: effectiveCameraName,
+        sourceType: 'phone',
+        inviteCode: inviteCode.trim().toUpperCase(),
+      });
+      setIsRegistered(true);
+      if (socketRef.current?.connected) {
+        socketRef.current.emit('register', {
+          id: effectiveCameraId,
+          name: effectiveCameraName,
+          role: 'camera',
+          sourceType: 'phone',
+        });
+      }
+    } catch (error) {
+      setRegistrationError(error.message || 'Failed to connect camera with PIN.');
+      setIsRegistered(false);
+    } finally {
+      setIsConnectingCamera(false);
+    }
+  }, [effectiveCameraId, effectiveCameraName, inviteCode]);
 
   const stopRecording = useCallback(() => {
     if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
@@ -123,6 +145,7 @@ export default function CameraStream() {
   );
 
   const detectMotion = useCallback(() => {
+    if (!isRegistered || !effectiveCameraId || !effectiveCameraName) return;
     const video = videoRef.current;
     const canvas = canvasRef.current;
     if (!video || !canvas) return;
@@ -168,7 +191,7 @@ export default function CameraStream() {
     }
 
     prevFrameRef.current = new Uint8ClampedArray(frameData);
-  }, [effectiveCameraId, effectiveCameraName, startRecording]);
+  }, [effectiveCameraId, effectiveCameraName, isRegistered, startRecording]);
 
   useEffect(() => {
     const socket = createRealtimeConnection();
@@ -350,17 +373,24 @@ export default function CameraStream() {
               onChange={(event) => setSourceType(event.target.value)}
             >
               <option value="phone">Samsung/Phone</option>
-              <option value="usb">USB Camera</option>
-              <option value="ip">IP Camera</option>
             </select>
+          </div>
+          <div className="mt-3">
+            <input
+              className="w-full rounded-lg border border-dark-700 bg-dark-900/40 px-3 py-2 text-sm"
+              value={inviteCode}
+              onChange={(event) => setInviteCode(event.target.value.toUpperCase())}
+              placeholder="Enter dashboard PIN"
+            />
           </div>
           <div className="mt-3">
             <button
               type="button"
               className="rounded-lg bg-primary-600 px-4 py-2 text-sm font-semibold hover:bg-primary-500"
               onClick={registerCameraNode}
+              disabled={isConnectingCamera}
             >
-              Connect Camera
+              {isConnectingCamera ? 'Connecting...' : 'Connect Camera'}
             </button>
           </div>
         </div>

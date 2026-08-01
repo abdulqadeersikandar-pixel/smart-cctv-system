@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createRealtimeConnection } from '../services/realtime';
+import { env } from '../config/env';
 import { useAppState } from './useAppState';
 
 function ensurePeerConnection(peersRef, cameraId, socket, getIceServers) {
@@ -61,7 +62,7 @@ export function useViewerStream(selectedCameraIds, onRealtimeUpdate) {
     socket.on('connect', async () => {
       // fetch server side webrtc config (iceServers)
       try {
-        const res = await fetch('/api/webrtc/config');
+        const res = await fetch(`${env.serverUrl}/api/webrtc/config`);
         if (res.ok) {
           const data = await res.json();
           if (data?.iceServers) {
@@ -284,4 +285,3 @@ export function useViewerStream(selectedCameraIds, onRealtimeUpdate) {
     bindVideoElement,
   };
 }
-

@@ -63,6 +63,9 @@ export default function Dashboard() {
   const [newCameraType, setNewCameraType] = useState('phone');
   const [newCameraSourceUrl, setNewCameraSourceUrl] = useState('');
   const [screenshotPreview, setScreenshotPreview] = useState('');
+  const [invitePin, setInvitePin] = useState('');
+  const [invitePinExpiry, setInvitePinExpiry] = useState('');
+  const [invitePinError, setInvitePinError] = useState('');
 
   const {
     onlineCameras,
@@ -145,6 +148,19 @@ export default function Dashboard() {
     const image = takeScreenshot(cameraId);
     if (image) {
       setScreenshotPreview(image);
+    }
+  }
+
+  async function handleGeneratePin() {
+    setInvitePinError('');
+    try {
+      const response = await apiClient.createCameraInviteCode(15);
+      setInvitePin(response?.inviteCode?.code || '');
+      setInvitePinExpiry(response?.inviteCode?.expiresAt || '');
+    } catch (error) {
+      setInvitePin('');
+      setInvitePinExpiry('');
+      setInvitePinError(error.message || 'Failed to generate PIN.');
     }
   }
 
@@ -307,6 +323,30 @@ export default function Dashboard() {
         <div className="mt-6 grid grid-cols-1 gap-6 xl:grid-cols-2">
           <section className="glass-panel p-4">
             <h2 className="mb-3 text-lg font-semibold">Camera Management</h2>
+            <div className="mb-4 rounded-lg border border-dark-700 bg-dark-900/30 p-3">
+              <p className="text-sm font-medium">Phone Camera PIN Pairing</p>
+              <p className="mt-1 text-xs text-gray-400">
+                Generate PIN here, then enter this PIN on the phone Camera Stream page.
+              </p>
+              <div className="mt-2 flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  className="rounded-lg border border-primary-500 px-3 py-2 text-xs hover:bg-primary-500/10"
+                  onClick={handleGeneratePin}
+                >
+                  Generate 15-Min PIN
+                </button>
+                {invitePin ? (
+                  <span className="rounded-lg border border-dark-600 px-3 py-2 text-sm font-mono tracking-widest">
+                    {invitePin}
+                  </span>
+                ) : null}
+                {invitePinExpiry ? (
+                  <span className="text-xs text-gray-400">Expires: {new Date(invitePinExpiry).toLocaleTimeString()}</span>
+                ) : null}
+              </div>
+              {invitePinError ? <p className="mt-2 text-xs text-red-300">{invitePinError}</p> : null}
+            </div>
             <form className="mb-4 grid grid-cols-1 gap-2 md:grid-cols-4" onSubmit={handleCreateCamera}>
               <input
                 className="rounded-lg border border-dark-700 bg-dark-900/40 px-3 py-2 text-sm"

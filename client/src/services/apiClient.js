@@ -47,6 +47,16 @@ export const apiClient = {
   removeCamera: (cameraId) => request(`/api/cameras/${cameraId}`, { method: 'DELETE' }),
   listEvents: () => request('/api/events'),
   listRecordings: () => request('/api/recordings'),
+  createCameraInviteCode: (expiresInMinutes = 15) =>
+    request('/api/camera-access/invite-codes', {
+      method: 'POST',
+      body: JSON.stringify({ expiresInMinutes }),
+    }),
+  requestCameraAccess: (payload) =>
+    request('/api/camera-access/request', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
   deleteRecording: (recordingId) => request(`/api/recordings/${recordingId}`, { method: 'DELETE' }),
   getRecordingDownloadUrl: (recordingId, source = 'auto') =>
     `${env.serverUrl}/api/recordings/${recordingId}/download?source=${source}`,
