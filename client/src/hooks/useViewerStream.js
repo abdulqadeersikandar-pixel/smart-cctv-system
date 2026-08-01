@@ -2,12 +2,13 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createRealtimeConnection } from '../services/realtime';
 import { useAppState } from './useAppState';
 
-function ensurePeerConnection(peersRef, cameraId, socket) {
+function ensurePeerConnection(peersRef, cameraId, socket, getIceServers) {
   const existing = peersRef.current.get(cameraId);
   if (existing) return existing;
 
+  const iceServers = (typeof getIceServers === 'function' ? getIceServers() : []) || [];
   const pc = new RTCPeerConnection({
-    iceServers: [
+    iceServers: iceServers.length ? iceServers : [
       { urls: 'stun:stun.l.google.com:19302' },
       { urls: 'stun:stun1.l.google.com:19302' },
     ],
@@ -38,6 +39,7 @@ export function useViewerStream(selectedCameraIds, onRealtimeUpdate) {
   const reconnectProbeRef = useRef(null);
   const videoElementsRef = useRef(new Map());
   const previousSelectedRef = useRef([]);
+  const iceServersRef = useRef([]);
 
   useEffect(() => {
     selectedRef.current = selectedCameraIds;
@@ -51,10 +53,25 @@ export function useViewerStream(selectedCameraIds, onRealtimeUpdate) {
   }, []);
 
   useEffect(() => {
-    const socket = createRealtimeConnection();
+      const socket = createRealtimeConnection();
     socketRef.current = socket;
+n    // try to fetch ICE server config from backend so TURN/STUN can be configured centrally
 
-    socket.on('connect', () => {
+    socket.on('connect', async () => {
+      // fetch server side webrtc config (iceServers)
+      try {
+        const res = await fetch('/api/webrtc/config');
+        if (res.ok) {
+          const data = await res.json();
+          if (data?.iceServers) {
+            iceServersRef.current = data.iceServers;
+          }
+        }
+      } catch (e) {
+        // ignore; fallback to default STUN servers below
+        console.warn('Failed to fetch ICE servers from backend, using default STUNs.');
+      }
+
       socket.emit('register', {
         id: `dashboard-viewer-${socket.id}`,
         name: 'Dashboard Viewer',
@@ -62,6 +79,11 @@ export function useViewerStream(selectedCameraIds, onRealtimeUpdate) {
       });
       selectedRef.current.forEach((cameraId) => reconnectCamera(cameraId));
     });
+n    // helper to expose ice servers to ensurePeerConnection
+    function getIceServers() {
+      return iceServersRef.current || [];
+    }
+
 
     socket.on('camera-status', ({ cameras }) => {
       dispatch({ type: 'SET_ONLINE_CAMERAS', payload: cameras });
@@ -70,7 +92,7 @@ export function useViewerStream(selectedCameraIds, onRealtimeUpdate) {
     socket.on('camera-offer', async ({ offer, cameraId }) => {
       if (!selectedRef.current.includes(cameraId)) return;
 
-      const pc = ensurePeerConnection(peersRef, cameraId, socket);
+      const pc = ensurePeerConnection(peersRef, cameraId, socket, getIceServers);
       pc.ontrack = (event) => {
         streamByCameraRef.current.set(cameraId, event.streams[0]);
         const videoEl = videoElementsRef.current.get(cameraId);
